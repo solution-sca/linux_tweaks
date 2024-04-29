@@ -1,0 +1,108 @@
+#!/bin/bash
+# PGr 2019-05-21
+# Uruchamianie komend w oknie screen o podanej nazwie.
+# Poprawka 2019-10-31
+# Poprawka 2020-01-07
+# Poprawka 2020-03-20
+#  - Dodanie aliasu -c (do --create)
+#  - Poprawiona obsługa parametrów 
+#  - -c tworzy w tle
+
+VERSION="1.4"
+DATE="2020-03-20"
+AUTHOR="PGr"
+
+function help(){
+echo -e "\
+
+Run command in named screen (screen -S SCREENNAME [...])
+
+    $(basename $0) [-S|-s SCREENNAME] [--] <command>
+    $(basename $0) [--create|-c [-S SCREENNAME]]
+    
+    if SCREENNAME is not given:
+        SCREENNAME=name_of_symbolic_link_to_this_scrript (not an alias!!!)
+    or finally:
+        environment variable SCREENNAME:
+            export SCREENNAME=Screen1
+            $(basename $0) ....
+    Hint:
+
+        Escape \$ in command with \\ (\$i is variable from your consloe; \\\$i is variable from screen environment)
+
+Version: ${VERSION} ${AUTHOR} ${DATE}
+" >&2
+}
+
+function get_count(){
+    local sname=$1
+    # shellcheck disable=SC2062
+    screen -list  ${sname} | grep -E \.${sname}[[:blank:]]+ | grep -cE ^[[:blank:]]*[[:digit:]]+\..*tached | tee /dev/null
+}
+
+# nazwa skryptu
+program_name=$(readlink -f $0)
+program_name="${program_name##*/}"
+# nazwa spod jakiej jest uruchamiany
+link_name=$(basename $0)
+create=0
+
+if [[ "${program_name}" != "${link_name}" ]]; then
+    SCREEN=${link_name}
+fi
+
+while true; do
+    case $1 in
+        -s|-S )
+            [ -z "$2" ] && echo "No name screen name given '[-S|-s name]'" >&2 && exit 1 
+            [[ "$2" =~ ^- ]] && echo "Ambigious screen name '[-S|-s name]'; name can't start with '-'" >&2 && exit 1 
+            SCREEN=$2
+            shift; shift;;
+        -c|--create)
+            create=1
+            shift;;
+        -h|--help)
+            help; exit 0;;
+        --)
+            break;;
+        *)
+            break;;
+    esac
+done
+
+if [ -z ${SCREEN} ]; then 
+    help
+    echo -e "Error: Can't get screen name\n" >&2
+    exit 1
+fi
+
+if  [ ${create} -eq 0 ] && [ "${#@}" -eq 0 ]; then 
+    echo can\'t get command to execute >&2
+    exit 1
+fi
+
+cnt=$(get_count ${SCREEN})
+[ $cnt -gt 1 ] && echo -e "More than one screen named ${SCREEN}" >&2 && exit 1
+if  [ ${create} -ne 0 ] ; then 
+    if [ ${cnt} -ne 0 ]; then
+        echo -e "Screen ${SCREEN} already exists" >&2
+        exit 1
+    fi
+    trap 'echo Screen creating error >&2; exit 1' ERR
+    screen -dmS ${SCREEN}
+    cnt=$(get_count ${SCREEN})
+    echo -e "${fg_green}Screen ${SCREEN} created (in the background)${fg_default}" >&2 
+    echo -e "Use:\n\tgetscreen ${SCREEN}                    \t${fg_green}# to attach screen${fg_default}" >&2 
+    echo -e "\talias ${SCREEN}=SCREEN='${SCREEN} screenexec'\t${fg_green}# to create alias${fg_default}" >&2 
+    echo -e "\t${SCREEN} [command....]                      \t${fg_green}# to use alias${fg_default}" >&2 
+    echo -e "\nHint: \$i is variable from your consloe; \\\$i is variable from screen environment" >&2
+    exit 0
+    trap - ERR
+fi
+
+cmd=$(echo -e "$@" | sed 's|[\$]|\\$|g')
+echo -e "command: ${cmd}; destination: ${SCREEN}" >&2
+[ $cnt -eq 0 ] && echo -e "No screen named ${SCREEN}" >&2 && exit 1
+
+screen -S ${SCREEN} -X stuff "${cmd}"^M
+exit $?

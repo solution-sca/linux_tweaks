@@ -1,0 +1,65 @@
+#!/bin/bash
+# Ping once each address from the list and wait 1 second for response
+
+# by PGr 2018-11-28
+#      Version 2024-04-29
+
+# Addres list can be passed as arguments or as an array
+if [ -z "${P1_HOSTS}" ]; then
+    P1_HOSTS=(
+        www.wp.pl
+        www.google.com
+        8.8.8.8
+        10.0.0.1
+    )
+fi
+
+function help(){    
+    export P1_HOSTS
+    echo -e "ping -c1 -w1 ...." >&2
+}
+
+function finish(){
+    wait
+    local num
+    if [ -f ${TFILE} ] && [[ "${TFILE}" =~ tmp\. ]]; then 
+        # shellcheck disable=2002
+	    num=$(cat ${TFILE} | wc -m)
+        echo -e "Errors: ${num}"
+        rm -f ${TFILE}
+    fi
+	return ${num}
+}
+
+function send_array(){
+    TFILE=$(mktemp)
+    export TFILE
+    for addr in "${@}"; do
+        $0 ${addr} &        
+    done
+}
+
+if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    help
+    exit 1
+elif [[ "$1" == "" ]]; then
+    send_array "${P1_HOSTS[@]}"
+    finish
+    exit $?
+elif [  ${#} -gt 1 ]; then
+    send_array "${@}"
+    finish
+    exit $?
+else
+
+    for ip in "$@"; do
+            ping -c 1 -w 1 ${ip} >/dev/null 2>/dev/null
+            res=$?
+            printf "ping %-14s " "${ip}"
+            # shellcheck disable=2154
+            [ ${res} -eq 0 ] &&  echo -e "[${fg_green}OK${fg_off}]" || echo -e "[${fg_red}FAILED${fg_off}]"
+        if [ ${res} -ne 0 ]  && [[ "${TFILE}" =~ tmp\. ]]; then
+            [[ "${TFILE}" =~ tmp\. ]] && printf "1" >>"${TFILE}"
+        fi
+    done
+fi

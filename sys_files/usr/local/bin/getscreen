@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# Program do przechwytywania sesji screen
+# Przechwytuje pierwszy odłączony screen z listy
+# by PGr 2019-05-21:
+# by PGr 2019-10-31 VERSION=1.1:
+#   - Rozpoznawanie, czy jest uruchomione wewnątrz screena na podstawie $TERM i $TERMCAP
+#   - Usunięcie śmieci
+#   - Usunięcie rzeczy związanych z wcześniejszymi problemami z logowaniem.
+#       - opcja force (-f --f) - przejmuje też screeny podłączone
+#   - zrezygnowałem:
+#       - opcja select (-s --select) - wyświetla listę screenów
+#       - opcja verbose
+# by PGr 2019-12-12 VERSION=1.2:
+#   - obsługa listy screenów
+#   - nowa logika wyboru.
+
+VERSION="1.2"
+DATE="2019-12-13"
+
+function help(){
+    echo -e "\
+Get screen from list (screen -list):
+    $(basename "$0") [-f|--force] 
+Get screen with name matching criteria:
+    $(basename "$0") [-f|--force] [fragment_of_screen_name]  
+Help:
+    $(basename "$0") [-h|--help]
+
+-f --force - getting attached screens too (detached first). 
+
+Version: ${VERSION} by PGr ${DATE}
+" >&2
+}
+
+function err1(){
+    printf "No deattached %sscreens %sfound.\n" "${msg2}" "${msg3}" >&2
+    exit 1
+}
+
+buf=$(($(echo "${TERMCAP}" | grep -c screen)+$(echo "${TERM}" | grep -c screen)))
+[ ${buf} -ne 0 ] && echo Can\'t run the program in a screen session >&2 && exit 1
+
+GS_FORCE=0
+while [ "${#@}" -ne 0 ]; do
+    if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then 
+        help
+        exit 1
+    elif [[ "$1" == "-f" ]] || [[ "$1" == "--force" ]]; then 
+         GS_FORCE=1 
+         msg2="nor attached " # nor! 
+    else 
+        GS_PATTERN=$1
+    fi
+    shift
+done
+
+if [ -z "${GS_PATTERN}" ]; then
+    detached=( $(screen -list | grep -E  '\(Detached\)[[:blank:]]*$' | awk '{print $1}') )
+    attached=( $(screen -list | grep -E  '\(Attached\)[[:blank:]]*$' | awk '{print $1}') )
+else
+    detached=( $(screen -list | grep -E  '\(Detached\)[[:blank:]]*$' | grep -E "${GS_PATTERN}" | awk '{print $1}') )
+    attached=( $(screen -list | grep -E  '\(Attached\)[[:blank:]]*$' | grep -E "${GS_PATTERN}" | awk '{print $1}') )
+fi
+
+if  [ ${#detached[@]} -eq 0 ] && [ ${GS_FORCE} -eq 0 ]; then
+    if [ -z ${GS_PATTERN} ]; then
+        echo "No detached screens found" >&2
+    else
+        echo "No detached screens matching criteria found" >&2
+    fi
+    exit 1
+elif [ ${GS_FORCE} -eq 1 ] && [ ${#detached[@]} -eq 0 ] && [ ${#attached[@]} -eq 0 ]; then
+    if [ -z ${GS_PATTERN} ]; then
+        echo "No screens found" >&2
+    else
+        echo "No screens matching criteria found" >&2
+    fi
+    exit 1
+fi
+
+if [ ${GS_FORCE} -eq 1 ]; then
+    choices=( ${detached[@]} ${attached[@]} )
+else
+    choices=( ${detached[@]} )
+fi
+
+if [ ${#choices[@]} -eq 1 ]; then
+    choice=${choices[0]}
+else
+    PS3='Please enter your choice: '
+    select choice in ${choices[@]}; do
+        [[ ! -z $choice ]] && break 
+    done
+fi
+
+is_attached=$(screen -list | grep -E  '\(Attached\)[[:blank:]]*$' | grep -c 19236.ns-ZZ-101)
+if [ ${is_attached} -ne 0 ]; then
+    if [ ${GS_FORCE} -eq 0 ] ; then
+        echo "Cant attach attached screen; use -f option" >&2
+        exit 1
+    fi
+    read -r -p "Attempt to get attached screen ${choice}. Type 'yes' to continue. " x
+    [[ "${x}" != "yes"  ]] && echo "Program interrupted." >&2 && exit 1
+fi
+
+echo -e "Screen found: ${choice}" >&2
+sleep 1 
+screen -D -R -S "${choice}"
